@@ -1,0 +1,151 @@
+---
+title: "Data Cleaning of Microtest Outcomes Data"
+output:
+  html_document: default
+  html_notebook: default
+---
+This document outlines some of the data cleaning routines used on the 2017 Microtest data to get it ready for further analysis.  The actual analysis will be detailed in another document.  This is mostly to be used as a guide to data cleaning in R, with particular relevance to the microtest outcomes data.  Future data will be different, have different problems, not have others, but may still require some similar procedures to clean and ultimately analyze the data.
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+```
+
+Without further delay, lets import the data and take a look.
+
+```{r}
+source("requirements.R")
+
+wkbk <- read_csv("~/microtest_outcomes/Data/Workbook no macros.csv")
+
+head(wkbk %>% select(1:10)) %>% kable("html") %>%
+                kable_styling(full_width = FALSE, position = "left", bootstrap_options = c("striped", "hover"))
+```
+
+At a glance, there are a lot of missing values, and some issues such as dollar signs and commas causing numeric values to be turned into strings.  There are some missing values that have been recorded as something else ("RF", "Dk", "-$").  Some of the responses in one row have also been shifted so that they occupy the incorrect cells (entry 143).  
+
+The bad row can (and probably should) be fixed in excel, but lets look at how one might shift it in R.  The discrepancy occurs at the "How well would you say the amount...." column and ends at the "contractorpayment" column.  We get the indices of these columns using which() and grepl(), and then simply shift this range (plus one column to make sure the end gets filled with the cell to its right) to the left:
+
+```{r, echo = TRUE}
+#use which and grepl to get start and end points
+start = which(grepl("How well would you say", colnames(wkbk)))
+end = which(grepl("contractorpayment", colnames(wkbk)))
+
+#shift the section of the row one to the right
+wkbk[143,(start-1):end] <- wkbk[143, start:(end+1)]
+```
+
+Turn all entries that indicate missing data into NA's:
+```{r, echo = TRUE}
+
+wkbk[wkbk == "DK" | wkbk == "Dk" | wkbk == "$-" | wkbk == "RF"] <- NA
+
+```
+
+The dollar signs and commas occur together (never separately).  We'll write a function to remove them from a specified column:
+
+```{r, echo = TRUE}
+#remove $
+remove_dollarsign <- function(el){
+  #check if the element begins with a dollar sign
+  if(grepl('^[$]', el)){
+    
+    #chop off the dollar sign with substr()
+    substring <- substr(el, 2, nchar(el))  
+    
+    #substitute nothing for commas and convert to numeric
+    return(as.numeric(gsub(",", "", substring)))
+  }
+  
+  #if it doesn't have a dollar sign in front just convert it to numeric
+  return(as.numeric(el))
+}
+```
+
+We apply this function to each column that needs it.  Scanning the document, these include "intake.gross.biz.sales", "intake.annual.draw", "intake.hhincome", and "survey.draw".  Lets write a couple functions that accomplish the task of finding columns with dollar signs.    
+
+```{r echo = TRUE}
+#function to check whether a column contains strings with dollar signs
+#hopefully there are not other columns that randomly contain dollar signs
+is_dollarsign <- function(col){
+  return(any(grepl("\\$", col)))
+}
+
+#function which returns names and indices of columns within a dataframe that include strings with dollar signs.
+find_dollarsign <- function(df){
+  return(
+    apply(df, 2, is_dollarsign)
+  )
+}
+
+```
+
+Now, simply apply our `remove_dollarsign()` function to each of these columns.
+
+```{r echo = TRUE}
+#get columns that have dollar signs
+columns_to_convert <- which(find_dollarsign(wkbk))
+
+#for each columns that contains dollar signs, apply the remove_dollarsign function.
+for(col in columns_to_convert){
+  
+  #print(wkbk %>% select(col))
+  wkbk[col] <- apply(wkbk %>% select(col), 1, FUN = remove_dollarsign)  
+  
+}
+```
+
+
+```{r, echo = FALSE, eval = FALSE}
+###Manual Removal of Dollar Signs###
+cols <- c("intake.gross.biz.sales", "intake.annual.draw", "intake.hhincome", "survey.draw", "survey.totalsales") 
+
+for(col in cols){
+
+  wkbk[col] <- apply(wkbk %>% select(col), 1, FUN = remove_dollarsign)  
+  
+}
+
+head(wkbk %>% select(cols)) %>% kable("html") %>%
+                kable_styling(full_width = FALSE, position = "left", bootstrap_options = c("striped", "hover"))
+
+```
+
+Dplyr allows us to easily slice the data.  A few examples:
+
+```{r, echo = TRUE, eval = FALSE}
+#by line:
+#get all records with end survey sales less than $100,000
+#select only the column survey.totalsales
+#extract the column as a vector
+#pass that vector to the histogram function
+wkbk %>% filter(survey.totalsales < 100000) %>% 
+         select(survey.totalsales) %>% 
+         pluck(1) %>%
+         hist()
+        
+#get only loan recipients or training program participants
+loaners <- wkbk %>% filter(wkbk$program == "LN")
+learners <- wkbk %>% filter(wkbk$program == "EDU")
+
+#get only records with completed survey status
+completed <- wkbk %>% filter(!grepl("Could", survey.status))
+```
+
+What type of analysis might we want to run?  A better question given the messiness of the data might be what type of analysis *can* we run?  For example, we might be interested in the % increase in total sales from intake to survey.  However some records do not include measurements at both intake and survey:
+
+```{r}
+head(wkbk %>% select(intake.gross.biz.sales, survey.totalsales), 10) %>% 
+  kable("html") %>%
+  kable_styling(full_width = FALSE, position = "left", bootstrap_options = c("striped", "hover"))
+  
+```
+
+A measurement that is consistent and mostly complete for all records is whether or not the participant had a business at survey.  Some of the entries in this column can also be filled by looking at the survey.status column which sometimes indicates that we do or do not know whether the client had a business during 2016.  
+
+With this in hand, we can use whether or not the client had a business in 2016 as our response and perform some basic logistic regression; It remains to select our regressors.  Though we have many variables, most are too incomplete and would only add noise to the analysis.  Some seemingly good candidates include whether the client had a business as intake, amount of the loan (0 indicates no loan), date of intake, gross sales at intake, and household income.  
+
+```{r}
+
+```
+
