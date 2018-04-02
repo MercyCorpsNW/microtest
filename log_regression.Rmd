@@ -1,0 +1,151 @@
+---
+title: "Analysis of 2011-2017 Microtest Data"
+output:
+  html_document:
+    df_print: paged
+    theme:  readable
+---
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+This document summarizes some logistic regression for the 2011-2017 microtest data.  With the data you are working with/your comfort level with R, the usefulness of this document/project package will vary.  At the very least, you can see some of the useful procedures/functions used to clean data and how to run logistic regression given a dataset.  Knowledge of dplyr and in general how to use the pipe operator %>% will help with understandability; these are some of the most useful tools in R anyway, so if you dont use them already, get on it!  If you have any questions feel free to email me at dmclaborne@gmail.com
+
+**The required packages for this analysis are in "requirements.R".  Please install all these packages before running the data cleaning or analysis portions of this project.**
+
+####**Data Preparation**####
+
+The data has been cleaned in the data_cleanup.R file and combined into a single dataframe with columns of interest.  A complete explanation of its (the data cleaning file) nuts and bolts would be very time consuming, but the general process is as follows 
+
+* Store all dataframes in a list
+* Apply cleaning functions to each element(data frame) of the list, these functions do things such as
+    + remove nuisance characters such as $, -, and other punctuation.
+    + replace all functional NA's ("Dk", "RF", etc.) with actual NA's.
+    + add a year column
+  
+* Identify which variables are of interest/useful and strip each dataframe down to these columns.  I manually went in and identified each column, as they are named differently in each dataframe.
+* Combine all dataframes into a single dataframe.
+* Standardize the values in all columns, i.e. a column might have ("yes", "YES", "NO", and "no"), we just want 2 levels "Yes" and "No".
+* Final cleaning, consistency check, filling/replacing missing values where appropriate
+
+A simpler data cleaning workflow is presented in the data_cleanup_2017.Rmd file, which outlines some steps taken to clean just the 2017 survey results.
+
+After running the data_cleanup.R file, there should be a dataframe called aggregate_df, which contains microtest records from 2011-2017.  wkbk_list is the list whose elements are the dataframes for each year.  
+
+Lets have a look at this dataframe:
+```{r}
+source("data_cleanup.R")
+
+head(aggregate_df) %>% kable("html") %>%
+  kable_styling(full_width = FALSE, position = "left", bootstrap_options = c("striped", "hover"))
+```
+
+####**Variables**####
+
+We are interested in the response variables of *whether or not someone moved off public assistance*, and *whether or not an individual started a business*. 
+As one can see from the head of the dataframe shown above, we have selected columns representing the individuals unique ID, program(s) they were enrolled in, intake date, gender, minority status, loan amount, business status at intake and survey, public assistance status at intake and survey, sales/draw at intake and survey, outside work status and income, and year.
+
+Lets create the response variables as columns.  For public assistance, they will get a 1 if they responded "Yes" at intake and "No" at survey.  For business starts, they will get a 1 if they responded "No" at intake and "Yes" at survey (and 0 otherwise, NA's are ignored).  The following code creates new dataframes from aggregate_df by selecting rows(clients) who were on public assistance at intake (or did not have a business at intake) and then creating our response variable.  These tasks are accomplished using the filter() function and the very useful mutate(variable_name = ifelse()) structure.
+
+```{r, echo = TRUE}
+survcmplt_pa <- aggregate_df %>% filter(intake.pubass == "Yes") %>% # create a dataframe that is the result of keeping only rows where intake.pubass is "Yes"
+  mutate(movedoff = ifelse(survey_pubass == "No", 1, 0)) #<- Read this as:  create a new column called movedoff.  If this particular row has a value of "No" in the survey_pubass column, movedoff gets a 1, otherwise, it gets a zero.
+
+surv_biz_start <- aggregate_df %>% filter(intake_biz == "No") %>%
+  mutate(biz_start= ifelse(survey_biz == "Yes", 1, 0))
+
+surv_biz_start_LN <- aggregate_df %>% filter(intake_biz == "No") %>%
+  mutate(biz_start= ifelse(survey_biz == "Yes", 1, 0)) %>%
+  filter(program == "LN")
+```
+
+####**Analysis**####
+
+Now for the easy part.  We perform two logistic regressions with our response variables being "moved off public assistance?" and "started a business in fiscal year?".  Our explanatory variables include household income, household size, gender, minority status, loan amount, and outside employment status for both regressions.  When public assistance status change is our response, we also have business status at intake as an explanatory.  When business status change is our response, we include public assistance at intake as an explanatory.
+
+The general form of the glm() procedure is similar to lm().  You specify your response, explanatory variables, and additionally a family of distributions and a link function (dont worry if you dont know what that means, the majority of people who run glm() don't either).  For our purposes, we will be using the binomial family with a logit link function.
+```{r, echo = TRUE}
+
+logmod_pa <- glm(movedoff ~ program + intake_hhincome + intake_hhsize + intake_outemploy + intake_biz + gender + minority + loan_amount, data = survcmplt_pa, family = binomial(link = "logit"))
+#summary(logmod_pa)
+pander(logmod_pa)
+
+logmod_biz <- glm(biz_start ~ program + intake_hhincome + intake_hhsize + intake_outemploy + intake.pubass + gender + minority + loan_amount, data = surv_biz_start, family = binomial(link = "logit"))
+#summary(logmod_biz)
+pander(logmod_biz)
+```
+
+**Public Assistance Status Results**
+
+The coefficient estimates for the model with public assistance status as the response are significant for the intercept, household size, household income, and loan_amount.  The coefficients are positive except for household size.  This indicates an associated increase in the odds of moving off of public assistance given an increase in these variables (except for household size which is negative).  It is good to check that this meets some sort of intuition.  
+
+* Households with higher income should tend to be -on average- closer to self-sustaining than those with lower income.  
+* Larger household sizes indicates more strain on the budget, and perhaps more reliance on public assistance, and thus our negative estimate of the coefficient.
+* One might interpret loan_amount's significance as being indicative of the success of loan programs, but it could also indicate that people who obtain larger loans simply tend to be better off in general, it is tough to say. 
+
+**Business Start Results**
+
+Coefficient estimates for business starts are significant for inclusion in the loan program and outside employment.  This should not be surprising, people seeking small business loans are far more likely to be starting businesses.  As for the significant estimate for outside employment, one might suspect that individuals without outside employment are likely looking for regular employment to support themselves first rather than starting a risky small business venture.
+
+####**Variable Selection**####
+
+When interpreting coefficient estimates, one must be careful of highly correlated variables.  Clearly, inclusion in the loan program and loan_amount should be highly correlated.  We can perform a simple anova to check for equality of means within each group.
+
+```{r, echo = TRUE}
+anova1 <- aov(loan_amount ~ program, data = surv_biz_start)
+summary(anova1)
+```
+
+Which shows a clear difference between groups.  We can also see whether the inclusion of the program variable affects the model by doing a likelihood ratio test.  The procedure here is to compare the likelihood of observing our data between a model with and without the program variable.
+
+```{r, echo = TRUE}
+#fit a model which includes program
+logmod_progyes <- glm(movedoff ~ program + intake_hhincome + intake_hhsize + intake_outemploy + intake_biz + gender + minority + loan_amount, data = survcmplt_pa, family = binomial(link = "logit"))
+
+#fit a model without program
+logmod_progno <- glm(movedoff ~ intake_hhincome + intake_hhsize + intake_outemploy + intake_biz + gender + minority + loan_amount, data = survcmplt_pa, family = binomial(link = "logit"))
+
+#perform a likelihood ratio test between the two models
+anova(logmod_progyes, logmod_progno, test = "LRT")
+
+#Perform the same procedure above but with biz_start as the response
+logmod_progyes <- glm(biz_start ~ program + intake_hhincome + intake_hhsize + intake_outemploy + intake.pubass + gender + minority + loan_amount, data = surv_biz_start, family = binomial(link = "logit"))
+
+logmod_progno <- glm(biz_start ~ intake_hhincome + intake_hhsize + intake_outemploy + intake.pubass + gender + minority + loan_amount, data = surv_biz_start, family = binomial(link = "logit"))
+
+anova(logmod_progyes, logmod_progno, test = "LRT")
+```
+
+In both cases, we see insignificant $\chi^2$ estimates, indicating the inclusion of the program variable does not produce an appreciable difference in model fit.  We expected this, since our assumption was that loan_amount contained most of the information contained in program.  Let's re-run the regression without `program`.   
+
+```{r}
+logmod_pa <- glm(movedoff ~ intake_hhincome + intake_hhsize + intake_outemploy + gender + minority + loan_amount, data = survcmplt_pa, family = binomial(link = "logit"))
+#summary(logmod_pa)
+pander(logmod_pa)
+
+logmod_biz <- glm(biz_start ~ intake_hhincome + intake_hhsize + intake_outemploy + intake.pubass + gender + minority + loan_amount, data = surv_biz_start, family = binomial(link = "logit"))
+#summary(logmod_biz)
+pander(logmod_biz)
+```
+
+For moving off of public assistance, the estimates for household size, household income, and loan amount remain significant.  The signs of the parameter estimates also remain the same.
+
+For business starts, we see the effect of removing program from the model.  Loan amount is now significant, it is assuming the role of program in describing the variation in the data, since it carries much of the same information.  We see a significant estimate for household size and outside employment, still consistent with our previous model.
+
+###**Conclusions and Ideas for Further Analysis**###
+In general, the most we can gather from this data is that economic variables such as household size and income tend to inform whether not a client will move off public assistance in the survey period.  Specifically, the higher your household income, the more likely you moved off public assistance, and the larger your household, the less likely.  For business starts, it can really be explained by whether or not you got a loan.  Got a loan?  You probably started a business.  Didn't seek a loan?  You probably didn't start a business, not too much of interest there.  The outside employment variable is somewhat interesting, which again we attempted to explain by someones increased willingness to assume more risk when they already have a source of income (or perhaps savings) to fall back on if things don't work out.
+
+####**You Can Add/Remove Variables Easily!**####
+Feel free to play around with variable selection and transformation.  Perhaps stepwise methods, log transformation of certain variables or adding other variables of interest from Vistashare.  **I have included the ID column in the fully aggregated dataframe.  These ID's correspond the the System Name ID field in Vistashare, which allows you to add columns/variables using a simple left join**.  In the below code `your_df` would be a dataframe with the `System_Name_ID` column and other columns that you wish to be joined to the full dataset.
+
+```{r, echo = TRUE, eval = FALSE}
+aggregate_df <- aggregate df %>% 
+ left_join(your_df, by = c("ID" = "System_Name_ID"))
+```
+
+ADD VARIABLES! See if theres a difference in some outcome between foundations I and foundations II graduates, if there is a relationship between the response and net worth etc.  Play around with different response variables.  See what informs %increases in gross sales, %increase in owner draw, etc. there is tons of data in Vistashare to play around with!
+
+####**Missing Data**####
+There is a lot of missing data here, the logistic regression we ran removes observations that do not have complete data.  Try using the `mice` package to fill missing values and see if your results change, or track down columns that can give you more complete data on some variable (e.g. race can be found in multiple columns, combine them to form a single complete column).
+

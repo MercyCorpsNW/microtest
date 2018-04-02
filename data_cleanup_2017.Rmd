@@ -1,10 +1,13 @@
 ---
 title: "Data Cleaning of Microtest Outcomes Data"
 output:
-  html_document: default
+  html_document:
+    theme: readable
   html_notebook: default
 ---
 This document outlines some of the data cleaning routines used on the 2017 Microtest data to get it ready for further analysis.  The actual analysis will be detailed in another document.  This is mostly to be used as a guide to data cleaning in R, with particular relevance to the microtest outcomes data.  Future data will be different, have different problems, not have others, but may still require some similar procedures to clean and ultimately analyze the data.
+
+I should note that this is a preliminary "easy mode" version, which is run only on the 2017 microtest data.  The actual cleaning that was performed combined all microtest data from 2011-2017.  Please see the code and feel free to improve upon it.
 
 I try to stay within the tidyverse as much as possible, which means I make heavy use of dplyr.  If you use R and arent using dplyr, you arent really using R.  If nothing else, I hope to show the ease with which data can be manipulated with dplyr.
 
@@ -18,7 +21,7 @@ Without further delay, lets import the data and take a look.
 ```{r}
 source("requirements.R")
 
-wkbk <- read_csv("Data/Workbook no macros.csv")
+wkbk <- read_csv("Data/2017_no_macros.csv")
 
 head(wkbk %>% select(1:10)) %>% kable("html") %>%
                 kable_styling(full_width = FALSE, position = "left", bootstrap_options = c("striped", "hover"))

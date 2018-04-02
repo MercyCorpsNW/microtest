@@ -1,4 +1,3 @@
-source("requirements.R")
 source("data_cleanup.R")
 
 test <- read_excel("Data/2016_no_macros.xlsx")
@@ -38,7 +37,7 @@ imputed <- amelia(survcmplt_pa %>% as.data.frame(), idvars = idvars, noms = noms
 
 imputed$imputations[c(3,4,5)] <- map(imputed$imputations[c(3,4,5)], ~mutate(.x, movedoff = ifelse(intake.pubass == "Yes" & survey.pubass == "No", 1, 0)))
 
-#########################################3
+#########################################
 
 for(i in 1:length(imputed$imputations)){
   print(i)
@@ -54,3 +53,21 @@ summary(logmod_complete)
 logit_mod <- glm(biz.survive ~ race + gender + survey.biz.at.intake + intake.hhincome + Dollars.loans, data = completed, family = binomial(link = "logit"))
 
 ####Current Problem: Non-Invertible Matrices when running amelia, causes problems when creating response variable####
+
+####Impute Complete DF####
+
+idvars = aggregate_df %>% select(-intake_hhincome, -intake_hhsize, -intake_biz, -gender, - minority, -loan_amount) %>% 
+  colnames()
+
+noms= c("gender", "minority", "intake_biz")
+
+imputed <- amelia(as.data.frame(aggregate_df), idvars = idvars, noms = noms)
+
+survcmplt_pa <- aggregate_df %>% filter(intake.pubass == "Yes") %>%
+  mutate(movedoff = ifelse(survey_pubass == "No", 1, 0))
+
+surv_biz_start <- aggregate_df %>% filter(intake_biz == "No") %>%
+  mutate(biz_start= ifelse(survey_biz == "Yes", 1, 0))
+
+logmod_pa <- glm(movedoff ~ intake_hhincome + intake_hhsize + intake_biz + gender + minority + loan_amount, data = survcmplt_pa, family = binomial(link = "logit"))
+logmod_biz <- glm(biz_start ~ intake_hhincome + intake_hhsize + intake_outemploy + gender + minority + loan_amount, data = surv_biz_start, family = binomial(link = "logit"))

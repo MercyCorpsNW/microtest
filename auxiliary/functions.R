@@ -27,17 +27,24 @@ find_dollarsign <- function(df){
 
 rm_dol_df <- function(df){
   columns_to_convert <- which(find_dollarsign(df))
-  for(col in columns_to_convert){
-    
-    #print(wkbk %>% select(col))
-    df[col] <- apply(df %>% select(col), 1, FUN = remove_dollarsign)  
-    
-  }
   
-  return(df)
+  df %>% mutate_at(columns_to_convert, function(x) gsub("\\$|[[:punct:]]", "", x))
+
 }
 
 #Turns any cells which hold an element in na_chars into NA.  
-make_na <- function(df, na_chars){
-  data.frame(apply(df, 2, function(x) replace(x, x %in% na_chars, NA)))
+replace_all <- function(df, na_chars, replace, cols = colnames(df)){
+  df %>% mutate_at(cols, function(x) ifelse(x %in% na_chars, replace, x))
 }
+
+#replace_all <- function(df, na_chars, replace){
+#  data.frame(apply(df, 2, function(x) replace(x, x %in% na_chars, replace)))
+#}
+
+#refactor columns to numeric or character
+refactor_cols <- function(df, numeric_cols, character_cols){
+  df %>% 
+    mutate_at(numeric_cols,function(x) as.numeric(as.character(x))) %>%
+    mutate_at(character_cols, as.factor)
+}
+
